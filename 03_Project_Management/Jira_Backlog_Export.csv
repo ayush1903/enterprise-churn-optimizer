@@ -1,0 +1,15 @@
+Issue Type,Summary,Description,Story Points,Sprint,Priority
+Epic,Data Pipeline & ETL Architecture,"Establish robust ingestion, validation, and cleaning pipelines for telco customer records.",13,Sprint 1,Highest
+Story,Ingest Raw Churn Records,"Given raw telco customer records in CSV format, when ingested via pandas pipeline, then all records are parsed and schema is validated.",3,Sprint 1,High
+Story,Handle Missing Values in TotalCharges,"Given blank whitespace entries in TotalCharges, when cleaned via numeric coercion, then missing values are converted to 0.0 without pipeline failure.",2,Sprint 1,High
+Story,Build Feature-Engineered Risk Scoring Engine,"Given customer tenure, contract type, and payment method attributes, when scoring rules are applied, then an index score (0-100) is assigned.",5,Sprint 1,Highest
+Epic,Interactive Analytics Dashboard,"Design and deploy multi-metric Streamlit analytics dashboard for executive decision making.",13,Sprint 2,High
+Story,KPI Cards & Revenue Metric Display,"Given filtered customer subsets, when dashboard renders, then Total Customers, Churn Rate %, Total MRR, and At-Risk MRR display instantly.",3,Sprint 2,High
+Story,Contract & Service Segmentation Visuals,"Given interactive filters, when user selects Contract or Internet Service, then grouped bar charts update dynamically.",5,Sprint 2,Medium
+Story,Raw Data Drill-down Expander,"Given filtered views, when stakeholder expands the data drawer, then corresponding customer records are viewable in tabular format.",2,Sprint 2,Low
+Epic,Proactive Retention Intervention Engine,"Create workflow triggers and intervention playbooks for customer success teams.",8,Sprint 3,High
+Story,Automate High-Risk Cohort Identification,"Given customers flagged with RiskScore > 70, when batch pipeline runs, then accounts are tagged as High Risk for priority handling.",3,Sprint 3,High
+Story,Generate Tailored Contract Incentive Playbooks,"Given Month-to-Month customers with >12 month tenure, when flagged for churn risk, then an automated annual discount offer is generated.",5,Sprint 3,High
+Epic,Quality Assurance & Production Release,"Perform data audit, prompt engineering documentation, and repository finalization.",5,Sprint 4,Medium
+Story,Document Prompt Engineering Library,"Given all GenAI prompts used across BA/DA/PM tracks, when compiled into prompt_library_used.md, then prompt efficiency audit is fully documented.",2,Sprint 4,Medium
+Story,Executive GitHub README Packaging,"Given all artifacts across 4 project directories, when README is structured, then architecture diagrams, KPI metrics, and run instructions are showcased.",3,Sprint 4,Medium
