@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import io
+from datetime import datetime
 
 # --- 1. Page Configuration ---
 st.set_page_config(
@@ -14,19 +15,14 @@ st.set_page_config(
 # --- 2. Custom Modern SaaS Styling ---
 st.markdown("""
 <style>
-    /* Dark Theme Background */
     .stApp {
         background-color: #0f172a;
         color: #f8fafc;
     }
-    
-    /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #1e293b;
         border-right: 1px solid #334155;
     }
-
-    /* Metric Cards Styling */
     div[data-testid="stMetric"] {
         background-color: #1e293b;
         border: 1px solid #334155;
@@ -35,26 +31,20 @@ st.markdown("""
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
         border-left: 5px solid #0284c7;
     }
-    
     div[data-testid="stMetric"] label {
         font-size: 0.85rem !important;
         color: #94a3b8 !important;
         font-weight: 600;
     }
-    
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
         font-size: 1.7rem !important;
         font-weight: 700;
         color: #f8fafc !important;
     }
-
-    /* Headers */
     h1, h2, h3, h4 {
         color: #ffffff !important;
         font-weight: 700;
     }
-
-    /* Quality Gate Banners */
     .clean-box-warning {
         background-color: #451a03;
         border: 1px solid #b45309;
@@ -81,12 +71,24 @@ PLOT_CONFIG = {
     'modeBarButtonsToAdd': ['drawline', 'drawopenpath', 'eraseshape']
 }
 
-# --- 3. Isolated Audit, Profiling & Auto-Cleaning Functions ---
+# --- 3. Multi-Format Ingestion Helper ---
+def load_data_from_file(uploaded_file):
+    """Loads CSV, XLSX, Parquet, or JSON files into a Pandas DataFrame."""
+    file_name = uploaded_file.name.lower()
+    if file_name.endswith('.csv'):
+        return pd.read_csv(uploaded_file)
+    elif file_name.endswith(('.xlsx', '.xls')):
+        return pd.read_excel(uploaded_file)
+    elif file_name.endswith('.parquet'):
+        return pd.read_parquet(uploaded_file)
+    elif file_name.endswith('.json'):
+        return pd.read_json(uploaded_file)
+    else:
+        raise ValueError(f"Unsupported file format: {uploaded_file.name}")
 
+# --- 4. Health Audit, Profiling & Auto-Cleaning Functions ---
 def run_health_audit(df: pd.DataFrame):
-    """Checks for nulls, whitespace blanks, duplicates, and disguised numerics."""
     issues = []
-    
     null_counts = int(df.isnull().sum().sum())
     if null_counts > 0:
         issues.append(f"Found **{null_counts:,}** missing/null values across columns.")
@@ -106,9 +108,7 @@ def run_health_audit(df: pd.DataFrame):
     return is_clean, issues
 
 def auto_clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
-    """Performs automated standard industry data cleaning."""
     clean_df = df.copy()
-    
     clean_df = clean_df.drop_duplicates()
     
     for col in clean_df.select_dtypes(include=['object', 'string']).columns:
@@ -126,47 +126,93 @@ def auto_clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
     return clean_df
 
 def profile_dataset_columns(df: pd.DataFrame):
-    """Intelligently classifies columns into discrete categories and continuous numbers."""
+    """Smart profiler classifying numeric vs categorical features without choking on small datasets."""
     cat_cols = []
     num_cols = []
-    
     for col in df.columns:
         unique_count = df[col].nunique(dropna=True)
         if pd.api.types.is_numeric_dtype(df[col]):
-            if unique_count <= 10:
+            # If numeric and strictly binary (<=2 unique values e.g. 0/1), treat as categorical/event
+            if unique_count <= 2:
                 cat_cols.append(col)
             else:
                 num_cols.append(col)
         else:
             cat_cols.append(col)
-            
     return cat_cols, num_cols
 
 def detect_recommended_mode(df: pd.DataFrame):
-    """Auto-detects whether the dataset is Event-based or Continuous-based."""
     for col in df.columns:
         u_vals = df[col].dropna().unique()
         if len(u_vals) in [2, 3]:
             str_vals = [str(x).strip().lower() for x in u_vals]
-            if any(k in str_vals for k in ['yes', 'no', '1', '0', 'true', 'false', 'churn', 'active', 'left', 'fatal', 'fraud']):
+            if any(k in str_vals for k in ['yes', 'no', '1', '0', 'true', 'false', 'churn', 'active', 'left', 'fatal', 'fraud', 'incident']):
                 return 0
     return 1
 
-# --- 4. Sidebar: File Ingestion with Fallback ---
-st.sidebar.header("📁 Data Source & Ingestion")
+def generate_executive_html_report(df_summary_dict: dict, table_preview_html: str) -> str:
+    metrics_cards_html = "".join([
+        f"""<div class="metric-card">
+            <div class="metric-title">{k}</div>
+            <div class="metric-val">{v}</div>
+        </div>""" for k, v in df_summary_dict.items()
+    ])
+    
+    html_template = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Executive Analytics Briefing</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 40px; }}
+            .container {{ max-width: 960px; margin: 0 auto; background: #ffffff; padding: 36px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; }}
+            .header {{ border-bottom: 2px solid #0284c7; padding-bottom: 16px; margin-bottom: 24px; }}
+            h1 {{ margin: 0 0 8px 0; color: #0f172a; font-size: 24px; }}
+            .meta {{ color: #64748b; font-size: 13px; }}
+            .grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }}
+            .metric-card {{ background: #f1f5f9; padding: 16px; border-radius: 8px; border-left: 4px solid #0284c7; }}
+            .metric-title {{ font-size: 12px; color: #475569; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }}
+            .metric-val {{ font-size: 20px; font-weight: 700; color: #0f172a; }}
+            .table-box {{ overflow-x: auto; margin-top: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+            th, td {{ padding: 10px 12px; border: 1px solid #e2e8f0; text-align: left; }}
+            th {{ background-color: #f8fafc; font-weight: 600; }}
+            .footer {{ margin-top: 36px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; text-align: right; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📊 Executive Analytics & Data Health Briefing</h1>
+                <div class="meta">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Engine: Universal Analytics Platform</div>
+            </div>
+            <h3>Key Performance Summary</h3>
+            <div class="grid">{metrics_cards_html}</div>
+            <h3>Data Sample & Structure (Top 10 Records)</h3>
+            <div class="table-box">{table_preview_html}</div>
+            <div class="footer">Confidential Internal Executive Briefing — Universal Analytics Engine</div>
+        </div>
+    </body>
+    </html>
+    """
+    return html_template
+
+# --- 5. Sidebar: Multi-Format File Ingestion ---
+st.sidebar.header("📁 Ingestion & Formats")
 
 uploaded_file = st.sidebar.file_uploader(
-    "Upload Any CSV Dataset",
-    type=["csv"],
-    help="Supports Telecom, Airbnb, Car Crash, Environmental, Healthcare, or SaaS data."
+    "Upload Dataset (.csv, .xlsx, .parquet, .json)",
+    type=["csv", "xlsx", "xls", "parquet", "json"],
+    help="Supports CSV, Excel workbooks, Parquet telemetry, or JSON extracts."
 )
 
 if uploaded_file is not None:
     try:
-        raw_df = pd.read_csv(uploaded_file)
+        raw_df = load_data_from_file(uploaded_file)
         source_name = f"Uploaded: {uploaded_file.name}"
     except Exception as e:
-        st.error(f"Error reading CSV: {e}")
+        st.error(f"Error loading file: {e}")
         st.stop()
 else:
     file_name = "WA_Fn-UseC_-Telco-Customer-Churn.csv"
@@ -176,7 +222,7 @@ else:
         raw_df = pd.read_csv("02_Data_Analytics/" + file_name)
     source_name = "Default Dataset: Telco Benchmark"
 
-# --- 5. Data Quality Gate & Session State ---
+# --- 6. Data Quality Gate ---
 is_clean, audit_issues = run_health_audit(raw_df)
 
 if "clean_choice" not in st.session_state:
@@ -195,9 +241,8 @@ elif st.session_state.clean_choice == "cleaned":
 else:
     active_df = raw_df.copy()
 
-# Header & Data Quality Banner
 st.title("🌐 Universal Multi-Domain Analytics Engine")
-st.caption(f"Active Source: **{source_name}** | Total Observations: **{len(active_df):,}** | Total Dimensions: **{len(active_df.columns)}**")
+st.caption(f"Active Source: **{source_name}** | Total Observations: **{len(active_df):,}** | Dimensions: **{len(active_df.columns)}**")
 
 if not is_clean and st.session_state.clean_choice == "pending":
     st.markdown("""
@@ -230,7 +275,7 @@ elif st.session_state.clean_choice == "cleaned":
     </div>
     """, unsafe_allow_html=True)
 
-# --- 6. Analysis Mode & Dispatcher ---
+# --- 7. Analysis Modes & Dispatcher ---
 st.sidebar.markdown("---")
 st.sidebar.header("🎯 Analysis Mode")
 
@@ -270,34 +315,26 @@ def find_default_index(col_list, keywords, fallback_idx=0):
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Feature Mapping")
 
-# --- Mode 1: Event & Binary Risk Analysis ---
+summary_metrics_for_report = {}
+
 if analysis_mode == "🚨 Event & Binary Risk Analysis":
     target_event_col = st.sidebar.selectbox(
         "Event / Risk Column (Target)",
         all_cols,
-        index=find_default_index(all_cols, ["churn", "status", "cancel", "fatality", "fraud", "event"], 1 if len(all_cols)>1 else 0)
+        index=find_default_index(all_cols, ["churn", "status", "cancel", "fatality", "fraud", "incident", "event"], 1 if len(all_cols)>1 else 0)
     )
     metric_measure_col = st.sidebar.selectbox(
         "Primary Measure / Impact Column",
         num_cols,
-        index=find_default_index(num_cols, ["monthly", "charge", "mrr", "spend", "cost", "speed", "amount"], 0)
+        index=find_default_index(num_cols, ["monthly", "charge", "mrr", "spend", "cost", "freight", "sales", "amount"], 0)
     )
     
     slicer_candidates = [c for c in cat_cols if c != target_event_col]
     if not slicer_candidates:
         slicer_candidates = all_cols
         
-    category_slicer_1 = st.sidebar.selectbox(
-        "Primary Category Slicer",
-        slicer_candidates,
-        index=find_default_index(slicer_candidates, ["contract", "weather", "type", "plan", "segment"], 0)
-    )
-    
-    category_slicer_2 = st.sidebar.selectbox(
-        "Secondary Category Slicer",
-        slicer_candidates,
-        index=find_default_index(slicer_candidates, ["payment", "internet", "road", "channel", "method"], 1 if len(slicer_candidates)>1 else 0)
-    )
+    category_slicer_1 = st.sidebar.selectbox("Primary Category Slicer", slicer_candidates, index=0)
+    category_slicer_2 = st.sidebar.selectbox("Secondary Category Slicer", slicer_candidates, index=1 if len(slicer_candidates)>1 else 0)
     
     def normalize_event(val):
         if pd.isna(val):
@@ -318,55 +355,52 @@ if analysis_mode == "🚨 Event & Binary Risk Analysis":
     total_impact = float(analysis_df[metric_measure_col].sum())
     risk_impact = float(analysis_df[analysis_df["__Event_Flag__"] == 1][metric_measure_col].sum())
 
+    summary_metrics_for_report = {
+        "Total Observations": f"{total_records:,}",
+        "Event / Risk Rate": f"{event_rate:.1f}%",
+        f"Total {metric_measure_col}": f"${total_impact:,.2f}",
+        f"At-Risk {metric_measure_col}": f"${risk_impact:,.2f}"
+    }
+
     st.divider()
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric(label="📋 Total Records", value=f"{total_records:,}")
+        st.metric("📋 Total Records", f"{total_records:,}")
     with c2:
-        st.metric(label="⚠️ Event / Risk Rate", value=f"{event_rate:.1f}%")
+        st.metric("⚠️ Event / Risk Rate", f"{event_rate:.1f}%")
     with c3:
-        st.metric(label=f"📊 Total {metric_measure_col}", value=f"{total_impact:,.2f}")
+        st.metric(f"📊 Total {metric_measure_col}", f"${total_impact:,.2f}")
     with c4:
-        st.metric(label=f"🚨 At-Risk {metric_measure_col}", value=f"{risk_impact:,.2f}")
+        st.metric(f"🚨 At-Risk {metric_measure_col}", f"${risk_impact:,.2f}")
     st.divider()
 
     row1_c1, row1_c2 = st.columns(2)
-    
     with row1_c1:
         st.subheader(f"📊 Chart 1: Occurrence by {category_slicer_1}")
         num_unique_slicer = analysis_df[category_slicer_1].nunique()
         if num_unique_slicer <= 15:
             grp1 = analysis_df.groupby([category_slicer_1, "__Event_Display__"]).size().reset_index(name="Count")
-            fig1 = px.bar(
-                grp1, x=category_slicer_1, y="Count", color="__Event_Display__", barmode="group",
-                color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark"
-            )
+            fig1 = px.bar(grp1, x=category_slicer_1, y="Count", color="__Event_Display__", barmode="group",
+                          color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark")
         else:
-            fig1 = px.histogram(
-                analysis_df, x=category_slicer_1, color="__Event_Display__", barmode="group", nbins=25,
-                color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark"
-            )
+            fig1 = px.histogram(analysis_df, x=category_slicer_1, color="__Event_Display__", barmode="group", nbins=25,
+                                color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark")
         fig1.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20))
         st.plotly_chart(fig1, use_container_width=True, config=PLOT_CONFIG)
 
     with row1_c2:
         st.subheader(f"🌐 Chart 2: {metric_measure_col} Impact by {category_slicer_2}")
-        fig2 = px.histogram(
-            analysis_df, x=category_slicer_2, y=metric_measure_col, color="__Event_Display__", barmode="stack",
-            color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark",
-            labels={metric_measure_col: f"Total {metric_measure_col}"}
-        )
+        fig2 = px.histogram(analysis_df, x=category_slicer_2, y=metric_measure_col, color="__Event_Display__", barmode="stack",
+                            color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark",
+                            labels={metric_measure_col: f"Total {metric_measure_col}"})
         fig2.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20), xaxis_tickangle=-20)
         st.plotly_chart(fig2, use_container_width=True, config=PLOT_CONFIG)
 
     row2_c1, row2_c2 = st.columns(2)
-
     with row2_c1:
         st.subheader(f"⏳ Chart 3: {metric_measure_col} Spread vs. Target")
-        fig3 = px.box(
-            analysis_df, x="__Event_Display__", y=metric_measure_col, color="__Event_Display__",
-            color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark"
-        )
+        fig3 = px.box(analysis_df, x="__Event_Display__", y=metric_measure_col, color="__Event_Display__",
+                      color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark")
         fig3.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20), showlegend=False)
         st.plotly_chart(fig3, use_container_width=True, config=PLOT_CONFIG)
 
@@ -374,35 +408,38 @@ if analysis_mode == "🚨 Event & Binary Risk Analysis":
         secondary_num = num_cols[1] if len(num_cols) > 1 else metric_measure_col
         st.subheader(f"💳 Chart 4: {metric_measure_col} vs. {secondary_num}")
         analysis_df[secondary_num] = pd.to_numeric(analysis_df[secondary_num], errors='coerce').fillna(0)
-        fig4 = px.scatter(
-            analysis_df, x=metric_measure_col, y=secondary_num, color="__Event_Display__",
-            color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"},
-            template="plotly_dark"
-        )
+        fig4 = px.scatter(analysis_df, x=metric_measure_col, y=secondary_num, color="__Event_Display__",
+                          color_discrete_map={"Event / Risk": "#ef4444", "Baseline / Normal": "#3b82f6"}, template="plotly_dark")
         fig4.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20))
         st.plotly_chart(fig4, use_container_width=True, config=PLOT_CONFIG)
 
-# --- Mode 2: Continuous Metrics & Trends (with Multi-Color Gradients) ---
 elif analysis_mode == "📈 Continuous Metrics & Trends":
-    primary_num = st.sidebar.selectbox("Primary Numeric Metric", num_cols, index=0)
-    secondary_num = st.sidebar.selectbox("Secondary Numeric Metric", num_cols, index=1 if len(num_cols)>1 else 0)
-    tertiary_num = st.sidebar.selectbox("Color / Gradient Metric (Tertiary)", num_cols, index=2 if len(num_cols)>2 else 0)
+    primary_num = st.sidebar.selectbox("Primary Numeric Metric (X)", num_cols, index=0)
+    secondary_num = st.sidebar.selectbox("Secondary Numeric Metric (Y)", num_cols, index=1 if len(num_cols)>1 else 0)
+    tertiary_num = st.sidebar.selectbox("Color / Gradient Metric (Optional)", num_cols, index=2 if len(num_cols)>2 else 0)
     
     analysis_df = active_df.copy()
     analysis_df[primary_num] = pd.to_numeric(analysis_df[primary_num], errors='coerce').fillna(0)
     analysis_df[secondary_num] = pd.to_numeric(analysis_df[secondary_num], errors='coerce').fillna(0)
     analysis_df[tertiary_num] = pd.to_numeric(analysis_df[tertiary_num], errors='coerce').fillna(0)
     
+    summary_metrics_for_report = {
+        "Total Observations": f"{len(analysis_df):,}",
+        f"Mean {primary_num}": f"{analysis_df[primary_num].mean():,.2f}",
+        f"Max {primary_num}": f"{analysis_df[primary_num].max():,.2f}",
+        f"Std Dev {primary_num}": f"{analysis_df[primary_num].std():,.2f}"
+    }
+
     st.divider()
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric(label="📋 Total Observations", value=f"{len(analysis_df):,}")
+        st.metric("📋 Total Observations", f"{len(analysis_df):,}")
     with c2:
-        st.metric(label=f"🎯 Mean {primary_num}", value=f"{analysis_df[primary_num].mean():,.2f}")
+        st.metric(f"🎯 Mean {primary_num}", f"{analysis_df[primary_num].mean():,.2f}")
     with c3:
-        st.metric(label=f"🏔️ Max {primary_num}", value=f"{analysis_df[primary_num].max():,.2f}")
+        st.metric(f"🏔️ Max {primary_num}", f"{analysis_df[primary_num].max():,.2f}")
     with c4:
-        st.metric(label=f"📊 Std Dev {primary_num}", value=f"{analysis_df[primary_num].std():,.2f}")
+        st.metric(f"📊 Std Dev {primary_num}", f"{analysis_df[primary_num].std():,.2f}")
     st.divider()
     
     row1_c1, row1_c2 = st.columns(2)
@@ -413,23 +450,25 @@ elif analysis_mode == "📈 Continuous Metrics & Trends":
             x=primary_num, 
             nbins=30, 
             marginal="box",
-            color_discrete_sequence=["#38bdf8"],
+            color_discrete_sequence=["#38bdf8"], 
             template="plotly_dark"
         )
+        # Force the marginal box plot to render as a clean standard rectangle (no bow-tie notches)
+        fig1.for_each_trace(lambda t: t.update(notched=False) if t.type == 'box' else None)
         fig1.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20))
         st.plotly_chart(fig1, use_container_width=True, config=PLOT_CONFIG)
         
     with row1_c2:
         st.subheader(f"📈 Chart 2: {primary_num} vs. {secondary_num}")
+        enable_trendline = "ols" if (primary_num != secondary_num and len(analysis_df) >= 3) else None
         fig2 = px.scatter(
             analysis_df, 
             x=primary_num, 
             y=secondary_num, 
-            color=tertiary_num,
-            color_continuous_scale="Viridis",
-            trendline="ols", 
-            template="plotly_dark",
-            labels={tertiary_num: f"{tertiary_num} (Gradient)"}
+            color=tertiary_num if (tertiary_num != primary_num and tertiary_num != secondary_num) else None,
+            color_continuous_scale="Viridis", 
+            trendline=enable_trendline, 
+            template="plotly_dark"
         )
         fig2.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20))
         st.plotly_chart(fig2, use_container_width=True, config=PLOT_CONFIG)
@@ -442,30 +481,35 @@ elif analysis_mode == "📈 Continuous Metrics & Trends":
         st.plotly_chart(fig3, use_container_width=True, config=PLOT_CONFIG)
         
     with row2_c2:
-        st.subheader(f"🌊 Chart 4: 2D Density ({primary_num} vs. {tertiary_num})")
-        fig4 = px.density_heatmap(analysis_df, x=primary_num, y=tertiary_num, nbinsx=20, nbinsy=20, color_continuous_scale="Plasma", template="plotly_dark")
+        st.subheader(f"🌊 Chart 4: 2D Density ({primary_num} vs. {secondary_num})")
+        fig4 = px.density_heatmap(analysis_df, x=primary_num, y=secondary_num, nbinsx=20, nbinsy=20, color_continuous_scale="Plasma", template="plotly_dark")
         fig4.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20))
         st.plotly_chart(fig4, use_container_width=True, config=PLOT_CONFIG)
 
-# --- Mode 3: Correlation & Driver Explorer ---
-else:
+else:  # Correlation & Driver Explorer
     num_features_count = len(num_cols)
     corr_matrix = active_df[num_cols].apply(pd.to_numeric, errors='coerce').dropna().corr()
-
     corr_unstacked = corr_matrix.abs().unstack()
     non_self_corr = corr_unstacked[corr_unstacked < 0.9999]
     max_corr_val = float(non_self_corr.max()) if not non_self_corr.empty else 0.0
 
+    summary_metrics_for_report = {
+        "Numerical Features": f"{num_features_count}",
+        "Matrix Dimensions": f"{num_features_count} × {num_features_count}",
+        "Max Correlation |r|": f"{max_corr_val:.3f}",
+        "Analysis Status": "Active"
+    }
+
     st.divider()
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric(label="🔢 Numerical Features", value=f"{num_features_count}")
+        st.metric("🔢 Numerical Features", f"{num_features_count}")
     with c2:
-        st.metric(label="📐 Matrix Dimensions", value=f"{num_features_count} × {num_features_count}")
+        st.metric("📐 Matrix Dimensions", f"{num_features_count} × {num_features_count}")
     with c3:
-        st.metric(label="🔥 Max Correlation |r|", value=f"{max_corr_val:.3f}")
+        st.metric("🔥 Max Correlation |r|", f"{max_corr_val:.3f}")
     with c4:
-        st.metric(label="⚡ Analysis Status", value="Active")
+        st.metric("⚡ Analysis Status", "Active")
     st.divider()
 
     st.subheader("🔗 Multi-Variable Numeric Correlation Matrix")
@@ -473,19 +517,34 @@ else:
     fig_corr.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=30, b=20))
     st.plotly_chart(fig_corr, use_container_width=True, config=PLOT_CONFIG)
 
-# --- 7. Data Preview & Export ---
+# --- 8. Exports: Cleansed CSV & 1-Click Executive HTML Report ---
 st.divider()
-with st.expander("📄 View Active Data & Download Clean Export"):
-    st.dataframe(active_df, use_container_width=True)
-    
+st.subheader("📥 Export & Reporting Center")
+
+export_col1, export_col2 = st.columns(2)
+
+with export_col1:
     csv_buffer = io.BytesIO()
     active_df.to_csv(csv_buffer, index=False)
-    csv_bytes = csv_buffer.getvalue()
+    st.download_button(
+        label="📄 Download Cleansed CSV Dataset",
+        data=csv_buffer.getvalue(),
+        file_name="universal_cleansed_dataset.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+with export_col2:
+    table_sample_html = active_df.head(10).to_html(classes='table', index=False)
+    html_report_content = generate_executive_html_report(summary_metrics_for_report, table_sample_html)
     
     st.download_button(
-        label="📥 Download Cleaned CSV Dataset",
-        data=csv_bytes,
-        file_name="universal_cleansed_dataset.csv",
-        mime="text/csv"
+        label="📊 Export 1-Click Executive HTML Report",
+        data=html_report_content,
+        file_name=f"executive_briefing_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+        mime="text/html",
+        use_container_width=True
     )
-    
+
+with st.expander("📄 View Active In-Memory Data Table"):
+    st.dataframe(active_df, use_container_width=True)
