@@ -141,7 +141,16 @@ streamlit run 02_Data_Analytics/app.py
 
 ---
 
+cat << 'EOF' >> README.md
 
+## 🚀 Supported Ingestion Formats & Features
+| Ingestion Format | Supported Engine | Automated Cleaning | HTML Briefing Export |
+| :--- | :--- | :---: | :---: |
+| **CSV (`.csv`)** | Native Pandas Delimited | ✅ | ✅ |
+| **Excel (`.xlsx`, `.xls`)** | OpenPyXL Engine | ✅ | ✅ |
+| **Apache Parquet (`.parquet`)** | PyArrow Columnar | ✅ | ✅ |
+| **JSON (`.json`)** | Pandas Structured Parser | ✅ | ✅ |
+EOF
 
 
 
